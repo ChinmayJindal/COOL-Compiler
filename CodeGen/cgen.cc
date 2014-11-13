@@ -619,15 +619,19 @@ void CgenClassTable::code_constants()
 
 CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 {
-   stringclasstag = 0 /* Change to your String class tag here */;
-   intclasstag =    0 /* Change to your Int class tag here */;
-   boolclasstag =   0 /* Change to your Bool class tag here */;
+   stringclasstag = 4 /* Change to your String class tag here */;
+   intclasstag =    2 /* Change to your Int class tag here */;
+   boolclasstag =   3 /* Change to your Bool class tag here */;
 
    enterscope();
    if (cgen_debug) cout << "Building CgenClassTable" << endl;
    install_basic_classes();
    install_classes(classes);
    build_inheritance_tree();
+
+   for (List<CgenNode> *l = nds; l; l=l->tl())
+   		ordered_nodes.push_back(l->hd());
+   reverse(ordered_nodes.begin(), ordered_nodes.end());
 
    code();
    exitscope();
@@ -815,7 +819,27 @@ void CgenNode::set_parentnd(CgenNodeP p)
   parentnd = p;
 }
 
+// function to code class names string indexes in StringTable
+void CgenClassTable::code_class_nameTab(){
+	str << CLASSNAMETAB << LABEL;
+	// iterating over all class names in reverse manner(vector is reversed)
+	for (int it = 0; it<ordered_nodes.size(); it++){
+		char* s = ordered_nodes[it]->get_name()->get_string();
+		StringEntry* entry = stringtable.lookup_string(s);
+		str << WORD;
+		entry->code_ref(str);
+		str << endl;
+	}
+}
 
+// function to code all class names with init and object suffix
+void CgenClassTable::code_class_objTab(){
+	str << CLASSOBJTAB << LABEL;
+	for (int it = 0; it<ordered_nodes.size(); it++){
+		str << WORD << ordered_nodes[it]->get_name() << PROTOBJ_SUFFIX << endl;
+		str << WORD << ordered_nodes[it]->get_name() << CLASSINIT_SUFFIX << endl;
+	}
+}
 
 void CgenClassTable::code()
 {
@@ -828,6 +852,11 @@ void CgenClassTable::code()
   if (cgen_debug) cout << "coding constants" << endl;
   code_constants();
 
+  if (cgen_debug) cout << "Printing class name table" << endl;
+  code_class_nameTab();
+
+  if (cgen_debug) cout << "Printing class objectTable" << endl;
+  code_class_objTab();
 //                 Add your code to emit
 //                   - prototype objects
 //                   - class_nameTab

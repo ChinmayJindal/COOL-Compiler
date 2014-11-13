@@ -4,6 +4,9 @@
 #include "cool-tree.h"
 #include "symtab.h"
 
+#include <vector>
+#include <algorithm>
+
 enum Basicness     {Basic, NotBasic};
 #define TRUE 1
 #define FALSE 0
@@ -21,7 +24,7 @@ private:
    int stringclasstag;
    int intclasstag;
    int boolclasstag;
-
+   std::vector <CgenNode*> ordered_nodes;
 
 // The following methods emit code for
 // constants and global declarations.
@@ -31,6 +34,10 @@ private:
    void code_bools(int);
    void code_select_gc();
    void code_constants();
+
+   void code_class_nameTab();
+   void code_class_objTab();
+
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
