@@ -51,6 +51,8 @@ private:
 
    // for init methods of each class
    void code_class_init();
+   // for methods of each class
+   void code_class_methods();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as

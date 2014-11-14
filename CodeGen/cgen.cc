@@ -989,7 +989,6 @@ void CgenClassTable::code_class_init(){
 		emit_push(FP, str);
 		emit_push(SELF, str);
 		emit_push(RA, str);
-
 		emit_addiu(FP, SP, 4, str);			// $fp = $sp+4 i.e callee has become active now
 		emit_move(SELF, ACC, str);			// save accumulater before calling parent
 
@@ -998,7 +997,7 @@ void CgenClassTable::code_class_init(){
 			str << JAL << node->get_parentnd()->get_name()->get_string() << CLASSINIT_SUFFIX << endl;
 
 		// evaluate all the initializations
-		for(int i=node->features->first(); node->features->more(i); i=node->features->next(i)){
+		for(unsigned i=node->features->first(); node->features->more(i); i=node->features->next(i)){
 			attr_class* attrib = dynamic_cast<attr_class*>(node->features->nth(i));
 			if(attrib!=NULL){
 				Expression val = attrib->init;			// init contains the expression on RHS
@@ -1020,6 +1019,42 @@ void CgenClassTable::code_class_init(){
 	}
 }
 
+// function to emit methods for all classes
+void CgenClassTable::code_class_methods(){
+	for(unsigned node_num=0; node_num<ordered_nodes.size(); node_num++){
+		CgenNodeP node = ordered_nodes[node_num];
+		Symbol current_class = node->get_name();
+
+		// iterate over all the methods
+		for(unsigned i=node->features->first(); node->features->more(i); i=node->features->next(i)){
+			method_class *func = dynamic_cast<method_class*>(node->features->nth(i));
+			if(func != NULL){
+				// calculate number of formals for this method
+				int numFormals = 0;
+				for(unsigned j=func->formals->first(); func->formals->more(j); j=func->formals->next(i))
+					numFormals++;
+
+				str << current_class << METHOD_SEP << func->name << LABEL;
+				emit_push(FP, str);
+				emit_push(SELF, str);
+				emit_push(RA, str);
+				emit_addiu(FP, SP, 4, str);			// $fp = $sp+4 i.e callee has become active now
+				emit_move(SELF, ACC, str);
+
+				// emit code for function body
+				Expression definition = func->expr;
+				definition->code(str);
+
+				emit_pop(RA, str);
+				emit_pop(SELF, str);
+				emit_pop(FP, str);
+				emit_addiu(SP, SP, numFormals*4, str);		// shift the stack pointer by number of arguments*4
+				emit_return(str);
+			}
+		}
+	}
+}
+
 void CgenClassTable::code()
 {
   if (cgen_debug) cout << "coding global data" << endl;
@@ -1031,16 +1066,16 @@ void CgenClassTable::code()
   if (cgen_debug) cout << "coding constants" << endl;
   code_constants();
 
-  if (cgen_debug) cout << "Printing class name table" << endl;
+  if (cgen_debug) cout << "coding class name table" << endl;
   code_class_nameTab();
 
-  if (cgen_debug) cout << "Printing class prototype objectTable" << endl;
+  if (cgen_debug) cout << "coding class prototype objectTable" << endl;
   code_class_objTab();
 
-  if (cgen_debug) cout << "Printing each class' dispatch tables" << endl;
+  if (cgen_debug) cout << "coding each class' dispatch tables" << endl;
   code_class_dispTab();
 
-  if (cgen_debug) cout << "Printing prototype objects for each class" << endl;
+  if (cgen_debug) cout << "coding prototype objects for each class" << endl;
   code_class_protoType();
 
 //                 Add your code to emit
@@ -1052,8 +1087,11 @@ void CgenClassTable::code()
   if (cgen_debug) cout << "coding global text" << endl;
   code_global_text();
 
-  if (cgen_debug) cout << "Printing init code for each class" << endl;
+  if (cgen_debug) cout << "coding init code for each class" << endl;
   code_class_init();
+
+  if (cgen_debug) cout << "coding methods for each class" << endl;
+  code_class_methods();
 //                 Add your code to emit
 //                   - object initializer
 //                   - the class methods
