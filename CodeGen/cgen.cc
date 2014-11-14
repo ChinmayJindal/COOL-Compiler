@@ -399,7 +399,7 @@ void StringEntry::code_def(ostream& s, int stringclasstag)
   code_ref(s);  s  << LABEL                                             // label
       << WORD << stringclasstag << endl                                 // tag
       << WORD << (DEFAULT_OBJFIELDS + STRING_SLOTS + (len+4)/4) << endl // size
-      << WORD;
+      << WORD << STRINGNAME << DISPTAB_SUFFIX;
 
 
  /***** Add dispatch information for class String ******/
@@ -442,7 +442,7 @@ void IntEntry::code_def(ostream &s, int intclasstag)
   code_ref(s);  s << LABEL                                // label
       << WORD << intclasstag << endl                      // class tag
       << WORD << (DEFAULT_OBJFIELDS + INT_SLOTS) << endl  // object size
-      << WORD; 
+      << WORD << INTNAME << DISPTAB_SUFFIX; 
 
  /***** Add dispatch information for class Int ******/
 
@@ -486,7 +486,7 @@ void BoolConst::code_def(ostream& s, int boolclasstag)
   code_ref(s);  s << LABEL                                  // label
       << WORD << boolclasstag << endl                       // class tag
       << WORD << (DEFAULT_OBJFIELDS + BOOL_SLOTS) << endl   // object size
-      << WORD;
+      << WORD << BOOLNAME << DISPTAB_SUFFIX;
 
  /***** Add dispatch information for class Bool ******/
 
@@ -841,13 +841,14 @@ void CgenClassTable::code_class_objTab(){
 	}
 }
 
+
 // database containing information about each method and its offset
 std::map< Symbol, std::map< Symbol, std::pair< int, Symbol> > >  methodDB; 
 
-// recursive function to fill dispatch table for class with symbol current
-void CgenClassTable::make_dispTable(CgenNodeP node, Symbol current_class){
+// recursive function to fill method table for class with symbol current
+void CgenClassTable::make_methodTable(CgenNodeP node, Symbol current_class){
 	if(node->get_name() != Object)		// reach towards the Object Class
-		make_dispTable(node->get_parentnd(), current_class);
+		make_methodTable(node->get_parentnd(), current_class);
 
 	for(int i=node->features->first(); node->features->more(i); i = node->features->next(i)){
 		method_class* func = dynamic_cast<method_class*>(node->features->nth(i));
@@ -864,14 +865,14 @@ void CgenClassTable::make_dispTable(CgenNodeP node, Symbol current_class){
 	}
 }
 
-// iterate over all classes and insert their dispatch tables into methodDB
+// iterate over all classes and insert their method tables into methodDB
 void CgenClassTable::populate_methodDB(){
 	for (int i=0; i<ordered_nodes.size(); i++){
 		CgenNodeP current_node = ordered_nodes[i];			// get node pointer
 		Symbol current_class = current_node->get_name();	// get class name
 		std::map< Symbol, std::pair< int, Symbol> > placeHolder;
-		methodDB[current_class] = placeHolder;				// insert empty Dispatch table for class
-		make_dispTable(current_node, current_class);
+		methodDB[current_class] = placeHolder;				// insert empty method table for class
+		make_methodTable(current_node, current_class);
 	}
 }
 
@@ -901,6 +902,77 @@ void CgenClassTable::code_class_dispTab(){
 	}
 }
 
+
+// database containing information about each method and its offset
+std::map< Symbol, std::map< Symbol, std::pair<int, Symbol> > >  attribDB;
+
+// recursive function to fill attribute table for class with symbol current
+void CgenClassTable::make_attribTable(CgenNodeP node, Symbol current_class){
+	if(node->get_name() != Object)
+		make_attribTable(node->get_parentnd(), current_class);
+	
+	for(int i=node->features->first(); node->features->more(i); i = node->features->next(i)){
+		attr_class* attrib = dynamic_cast<attr_class*>(node->features->nth(i));
+		if(attrib!=NULL){
+			int offset = attribDB[current_class].size();
+			attribDB[current_class][attrib->name] = std::make_pair(offset, attrib->type_decl);
+		}
+	}
+}
+
+// iterate over all classes and insert their attribute tables into attribDB
+void CgenClassTable::populate_attribDB(){
+	for (int i=0; i<ordered_nodes.size(); i++){
+		CgenNodeP current_node = ordered_nodes[i];			// get node pointer
+		Symbol current_class = current_node->get_name();	// get class name
+		std::map< Symbol, std::pair<int, Symbol> > placeHolder;
+		attribDB[current_class] = placeHolder;				// insert empty attribute table for class
+		make_attribTable(current_node, current_class);
+	}
+}
+
+// function to emit prototype objects for all classes
+void CgenClassTable::code_class_protoType(){
+	populate_attribDB();
+
+	for(int i=0; i<ordered_nodes.size(); i++){
+		Symbol current_class = ordered_nodes[i]->get_name();
+		str << WORD << "-1\n" << current_class << PROTOBJ_SUFFIX << LABEL;
+		str << WORD << i << endl; 										// class tag
+		str << WORD << 3 + attribDB[current_class].size() << endl;		// size of prototype object
+		str << WORD << current_class << DISPTAB_SUFFIX << endl;			// dispatch table
+		
+		std::vector< std::pair<int, Symbol> > ordered_attribs;			// attributes for class ordered according to offsets
+		
+		// iterating over unordered attributes of this class and dumping in vector
+		std::map<Symbol, std::pair<int, Symbol> >::iterator it;
+		for(it = attribDB[current_class].begin(); it!=attribDB[current_class].end(); it++)
+			ordered_attribs.push_back(std::make_pair( (it->second).first, it->first));
+
+		std::sort(ordered_attribs.begin(), ordered_attribs.end(), compare);		// sort the attributes
+		
+		// emit code for all the attributes
+		for(int j=0; j<ordered_attribs.size(); j++){
+			Symbol attr_type = attribDB[current_class][ordered_attribs[j].second].second;
+			str << WORD;
+			if(attr_type == Int){				// default is 0
+				IntEntry *entry = inttable.lookup_string("0");
+				entry->code_ref(str);
+			}
+			else if (attr_type == Str){			// default is empty string
+				StringEntry *entry = stringtable.lookup_string("");
+				entry->code_ref(str);
+			}
+			else if (attr_type == Bool)			// default value is false
+				falsebool.code_ref(str);
+			else
+				str << 0;
+
+			str << endl;
+		}
+	}
+}
+
 void CgenClassTable::code()
 {
   if (cgen_debug) cout << "coding global data" << endl;
@@ -920,7 +992,10 @@ void CgenClassTable::code()
 
   if (cgen_debug) cout << "Printing each class' dispatch tables" << endl;
   code_class_dispTab();
-  
+
+  if (cgen_debug) cout << "Printing prototype objects for each class" << endl;
+  code_class_protoType();
+
 //                 Add your code to emit
 //                   - prototype objects
 //                   - class_nameTab

@@ -38,9 +38,15 @@ private:
 
    void code_class_nameTab();
    void code_class_objTab();
-   void make_dispTable(CgenNodeP, Symbol);
+
+   // for making method tables and dispatch tables
+   void make_methodTable(CgenNodeP, Symbol);
    void populate_methodDB();
    void code_class_dispTab();
+
+   void make_attribTable(CgenNodeP, Symbol);
+   void populate_attribDB();
+   void code_class_protoType();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
