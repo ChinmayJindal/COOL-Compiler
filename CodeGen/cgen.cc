@@ -835,9 +835,69 @@ void CgenClassTable::code_class_nameTab(){
 // function to code all class names with init and object suffix
 void CgenClassTable::code_class_objTab(){
 	str << CLASSOBJTAB << LABEL;
-	for (int it = 0; it<ordered_nodes.size(); it++){
+	for (int it=0; it<ordered_nodes.size(); it++){
 		str << WORD << ordered_nodes[it]->get_name() << PROTOBJ_SUFFIX << endl;
 		str << WORD << ordered_nodes[it]->get_name() << CLASSINIT_SUFFIX << endl;
+	}
+}
+
+// database containing information about each method and its offset
+std::map< Symbol, std::map< Symbol, std::pair< int, Symbol> > >  methodDB; 
+
+// recursive function to fill dispatch table for class with symbol current
+void CgenClassTable::make_dispTable(CgenNodeP node, Symbol current_class){
+	if(node->get_name() != Object)		// reach towards the Object Class
+		make_dispTable(node->get_parentnd(), current_class);
+
+	for(int i=node->features->first(); node->features->more(i); i = node->features->next(i)){
+		method_class* func = dynamic_cast<method_class*>(node->features->nth(i));
+		if(func!=NULL){
+			/* if method is already there i.e end iterator is not returned by find,
+			   just update the class name in the pair, offset will be same  */
+			if(methodDB[current_class].find(func->name) != methodDB[current_class].end())
+				methodDB[current_class][func->name].second = node->get_name();
+			else{		// add new entry if method isn't present
+				int offset = methodDB[current_class].size();
+				methodDB[current_class][func->name] = std::make_pair(offset, node->get_name());
+			}
+		}
+	}
+}
+
+// iterate over all classes and insert their dispatch tables into methodDB
+void CgenClassTable::populate_methodDB(){
+	for (int i=0; i<ordered_nodes.size(); i++){
+		CgenNodeP current_node = ordered_nodes[i];			// get node pointer
+		Symbol current_class = current_node->get_name();	// get class name
+		std::map< Symbol, std::pair< int, Symbol> > placeHolder;
+		methodDB[current_class] = placeHolder;				// insert empty Dispatch table for class
+		make_dispTable(current_node, current_class);
+	}
+}
+
+int compare(std::pair< int, Symbol> a, std::pair< int, Symbol> b){
+	return (a.first < b.first);
+}
+
+// function to emit dispatch tables for all classes
+void CgenClassTable::code_class_dispTab(){
+	populate_methodDB();
+	// iterating over all classes
+	for(int i=0; i<ordered_nodes.size(); i++){
+		Symbol current_class = ordered_nodes[i]->get_name();
+
+		std::vector< std::pair<int, Symbol> > ordered_methods;		// methods for this class ordered with offsets
+		
+		// iterating over unordered methods of this class and dumping in vector
+		std::map< Symbol, std::pair< int, Symbol> >::iterator it;
+		for(it = methodDB[current_class].begin(); it!=methodDB[current_class].end(); it++)
+			ordered_methods.push_back(std::make_pair((it->second).first, it->first));
+
+		std::sort(ordered_methods.begin(), ordered_methods.end(), compare);
+		
+		str << current_class << DISPTAB_SUFFIX << LABEL; 
+		for(int i=0; i<ordered_methods.size(); i++)
+			str << WORD << methodDB[current_class][ordered_methods[i].second].second << METHOD_SEP << ordered_methods[i].second << endl;	
 	}
 }
 
@@ -855,8 +915,12 @@ void CgenClassTable::code()
   if (cgen_debug) cout << "Printing class name table" << endl;
   code_class_nameTab();
 
-  if (cgen_debug) cout << "Printing class objectTable" << endl;
+  if (cgen_debug) cout << "Printing class prototype objectTable" << endl;
   code_class_objTab();
+
+  if (cgen_debug) cout << "Printing each class' dispatch tables" << endl;
+  code_class_dispTab();
+  
 //                 Add your code to emit
 //                   - prototype objects
 //                   - class_nameTab

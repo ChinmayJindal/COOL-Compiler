@@ -5,6 +5,7 @@
 #include "symtab.h"
 
 #include <vector>
+#include <map>
 #include <algorithm>
 
 enum Basicness     {Basic, NotBasic};
@@ -37,7 +38,9 @@ private:
 
    void code_class_nameTab();
    void code_class_objTab();
-
+   void make_dispTable(CgenNodeP, Symbol);
+   void populate_methodDB();
+   void code_class_dispTab();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
