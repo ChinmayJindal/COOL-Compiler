@@ -44,9 +44,13 @@ private:
    void populate_methodDB();
    void code_class_dispTab();
 
+   // for making attribute tables and emitting prototype objects
    void make_attribTable(CgenNodeP, Symbol);
    void populate_attribDB();
    void code_class_protoType();
+
+   // for init methods of each class
+   void code_class_init();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as

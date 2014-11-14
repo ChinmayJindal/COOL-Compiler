@@ -322,6 +322,12 @@ static void emit_push(char *reg, ostream& str)
   emit_addiu(SP,SP,-4,str);
 }
 
+// Pop the top of stack and store in reg register
+static void emit_pop(char *reg, ostream& str){
+	emit_load(reg,0,SP,str);
+	emit_addiu(SP,SP,4,str);
+}
+
 //
 // Fetch the integer value in an Int object.
 // Emits code to fetch the integer value of the Integer object pointed
@@ -781,7 +787,7 @@ void CgenClassTable::install_class(CgenNodeP nd)
 
 void CgenClassTable::install_classes(Classes cs)
 {
-  for(int i = cs->first(); cs->more(i); i = cs->next(i))
+  for(unsigned i = cs->first(); cs->more(i); i = cs->next(i))
     install_class(new CgenNode(cs->nth(i),NotBasic,this));
 }
 
@@ -823,7 +829,7 @@ void CgenNode::set_parentnd(CgenNodeP p)
 void CgenClassTable::code_class_nameTab(){
 	str << CLASSNAMETAB << LABEL;
 	// iterating over all class names in reverse manner(vector is reversed)
-	for (int it = 0; it<ordered_nodes.size(); it++){
+	for (unsigned it = 0; it<ordered_nodes.size(); it++){
 		char* s = ordered_nodes[it]->get_name()->get_string();
 		StringEntry* entry = stringtable.lookup_string(s);
 		str << WORD;
@@ -835,7 +841,7 @@ void CgenClassTable::code_class_nameTab(){
 // function to code all class names with init and object suffix
 void CgenClassTable::code_class_objTab(){
 	str << CLASSOBJTAB << LABEL;
-	for (int it=0; it<ordered_nodes.size(); it++){
+	for (unsigned it=0; it<ordered_nodes.size(); it++){
 		str << WORD << ordered_nodes[it]->get_name() << PROTOBJ_SUFFIX << endl;
 		str << WORD << ordered_nodes[it]->get_name() << CLASSINIT_SUFFIX << endl;
 	}
@@ -850,7 +856,7 @@ void CgenClassTable::make_methodTable(CgenNodeP node, Symbol current_class){
 	if(node->get_name() != Object)		// reach towards the Object Class
 		make_methodTable(node->get_parentnd(), current_class);
 
-	for(int i=node->features->first(); node->features->more(i); i = node->features->next(i)){
+	for(unsigned i=node->features->first(); node->features->more(i); i = node->features->next(i)){
 		method_class* func = dynamic_cast<method_class*>(node->features->nth(i));
 		if(func!=NULL){
 			/* if method is already there i.e end iterator is not returned by find,
@@ -867,7 +873,7 @@ void CgenClassTable::make_methodTable(CgenNodeP node, Symbol current_class){
 
 // iterate over all classes and insert their method tables into methodDB
 void CgenClassTable::populate_methodDB(){
-	for (int i=0; i<ordered_nodes.size(); i++){
+	for (unsigned i=0; i<ordered_nodes.size(); i++){
 		CgenNodeP current_node = ordered_nodes[i];			// get node pointer
 		Symbol current_class = current_node->get_name();	// get class name
 		std::map< Symbol, std::pair< int, Symbol> > placeHolder;
@@ -884,7 +890,7 @@ int compare(std::pair< int, Symbol> a, std::pair< int, Symbol> b){
 void CgenClassTable::code_class_dispTab(){
 	populate_methodDB();
 	// iterating over all classes
-	for(int i=0; i<ordered_nodes.size(); i++){
+	for(unsigned i=0; i<ordered_nodes.size(); i++){
 		Symbol current_class = ordered_nodes[i]->get_name();
 
 		std::vector< std::pair<int, Symbol> > ordered_methods;		// methods for this class ordered with offsets
@@ -911,7 +917,7 @@ void CgenClassTable::make_attribTable(CgenNodeP node, Symbol current_class){
 	if(node->get_name() != Object)
 		make_attribTable(node->get_parentnd(), current_class);
 	
-	for(int i=node->features->first(); node->features->more(i); i = node->features->next(i)){
+	for(unsigned i=node->features->first(); node->features->more(i); i = node->features->next(i)){
 		attr_class* attrib = dynamic_cast<attr_class*>(node->features->nth(i));
 		if(attrib!=NULL){
 			int offset = attribDB[current_class].size();
@@ -922,7 +928,7 @@ void CgenClassTable::make_attribTable(CgenNodeP node, Symbol current_class){
 
 // iterate over all classes and insert their attribute tables into attribDB
 void CgenClassTable::populate_attribDB(){
-	for (int i=0; i<ordered_nodes.size(); i++){
+	for (unsigned i=0; i<ordered_nodes.size(); i++){
 		CgenNodeP current_node = ordered_nodes[i];			// get node pointer
 		Symbol current_class = current_node->get_name();	// get class name
 		std::map< Symbol, std::pair<int, Symbol> > placeHolder;
@@ -935,7 +941,7 @@ void CgenClassTable::populate_attribDB(){
 void CgenClassTable::code_class_protoType(){
 	populate_attribDB();
 
-	for(int i=0; i<ordered_nodes.size(); i++){
+	for(unsigned i=0; i<ordered_nodes.size(); i++){
 		Symbol current_class = ordered_nodes[i]->get_name();
 		str << WORD << "-1\n" << current_class << PROTOBJ_SUFFIX << LABEL;
 		str << WORD << i << endl; 										// class tag
@@ -952,7 +958,7 @@ void CgenClassTable::code_class_protoType(){
 		std::sort(ordered_attribs.begin(), ordered_attribs.end(), compare);		// sort the attributes
 		
 		// emit code for all the attributes
-		for(int j=0; j<ordered_attribs.size(); j++){
+		for(unsigned j=0; j<ordered_attribs.size(); j++){
 			Symbol attr_type = attribDB[current_class][ordered_attribs[j].second].second;
 			str << WORD;
 			if(attr_type == Int){				// default is 0
@@ -970,6 +976,47 @@ void CgenClassTable::code_class_protoType(){
 
 			str << endl;
 		}
+	}
+}
+
+// function to emit init function code for all classes
+void CgenClassTable::code_class_init(){
+	for(unsigned node_num=0; node_num<ordered_nodes.size(); node_num++){
+		CgenNodeP node = ordered_nodes[node_num];
+		Symbol current_class = node->get_name();
+
+		str << current_class << CLASSINIT_SUFFIX << LABEL;
+		emit_push(FP, str);
+		emit_push(SELF, str);
+		emit_push(RA, str);
+
+		emit_addiu(FP, SP, 4, str);			// $fp = $sp+4 i.e callee has become active now
+		emit_move(SELF, ACC, str);			// save accumulater before calling parent
+
+		// call parent if its present
+		if(node->get_name() != Object)
+			str << JAL << node->get_parentnd()->get_name()->get_string() << CLASSINIT_SUFFIX << endl;
+
+		// evaluate all the initializations
+		for(int i=node->features->first(); node->features->more(i); i=node->features->next(i)){
+			attr_class* attrib = dynamic_cast<attr_class*>(node->features->nth(i));
+			if(attrib!=NULL){
+				Expression val = attrib->init;			// init contains the expression on RHS
+				if(val->get_type() != NULL){			// if expression has type assigned to it
+					val->code(str);
+					int offset = 3 + attribDB[current_class][attrib->name].first;
+					emit_store(ACC, offset, SELF, str);	// put the evaluated expression at right place in object
+				}
+			}
+		}
+
+		emit_move(ACC, SELF, str);			// restore accumultor after parent call
+		
+		emit_pop(RA, str);
+		emit_pop(SELF, str);
+		emit_pop(FP, str);
+
+		emit_return(str);					// return to the address in RA
 	}
 }
 
@@ -1005,6 +1052,8 @@ void CgenClassTable::code()
   if (cgen_debug) cout << "coding global text" << endl;
   code_global_text();
 
+  if (cgen_debug) cout << "Printing init code for each class" << endl;
+  code_class_init();
 //                 Add your code to emit
 //                   - object initializer
 //                   - the class methods
@@ -1125,5 +1174,3 @@ void no_expr_class::code(ostream &s) {
 
 void object_class::code(ostream &s) {
 }
-
-
