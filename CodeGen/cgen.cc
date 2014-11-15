@@ -324,7 +324,7 @@ static void emit_push(char *reg, ostream& str)
 
 // Pop the top of stack and store in reg register
 static void emit_pop(char *reg, ostream& str){
-	emit_load(reg,0,SP,str);
+	emit_load(reg,1,SP,str);
 	emit_addiu(SP,SP,4,str);
 }
 
@@ -849,6 +849,7 @@ void CgenClassTable::code_class_objTab(){
 
 
 // database containing information about each method and its offset
+// map <className, map< methodName, pair< offset, className> > >
 std::map< Symbol, std::map< Symbol, std::pair< int, Symbol> > >  methodDB; 
 
 // recursive function to fill method table for class with symbol current
@@ -903,13 +904,13 @@ void CgenClassTable::code_class_dispTab(){
 		std::sort(ordered_methods.begin(), ordered_methods.end(), compare);
 		
 		str << current_class << DISPTAB_SUFFIX << LABEL; 
-		for(int i=0; i<ordered_methods.size(); i++)
+		for(unsigned i=0; i<ordered_methods.size(); i++)
 			str << WORD << methodDB[current_class][ordered_methods[i].second].second << METHOD_SEP << ordered_methods[i].second << endl;	
 	}
 }
 
 
-// database containing information about each method and its offset
+// database containing information about each attribute and its offset
 std::map< Symbol, std::map< Symbol, std::pair<int, Symbol> > >  attribDB;
 
 // recursive function to fill attribute table for class with symbol current
@@ -1025,31 +1026,33 @@ void CgenClassTable::code_class_methods(){
 		CgenNodeP node = ordered_nodes[node_num];
 		Symbol current_class = node->get_name();
 
-		// iterate over all the methods
-		for(unsigned i=node->features->first(); node->features->more(i); i=node->features->next(i)){
-			method_class *func = dynamic_cast<method_class*>(node->features->nth(i));
-			if(func != NULL){
-				// calculate number of formals for this method
-				int numFormals = 0;
-				for(unsigned j=func->formals->first(); func->formals->more(j); j=func->formals->next(i))
-					numFormals++;
+		if(current_class!=Object && current_class!=Str && current_class!=IO){
+			// iterate over all the methods
+			for(unsigned i=node->features->first(); node->features->more(i); i=node->features->next(i)){
+				method_class *func = dynamic_cast<method_class*>(node->features->nth(i));
+				if(func != NULL){
+					// calculate number of formals for this method
+					int numFormals = 0;
+					for(unsigned j=func->formals->first(); func->formals->more(j); j=func->formals->next(i))
+						numFormals++;
 
-				str << current_class << METHOD_SEP << func->name << LABEL;
-				emit_push(FP, str);
-				emit_push(SELF, str);
-				emit_push(RA, str);
-				emit_addiu(FP, SP, 4, str);			// $fp = $sp+4 i.e callee has become active now
-				emit_move(SELF, ACC, str);
+					str << current_class << METHOD_SEP << func->name << LABEL;
+					emit_push(FP, str);
+					emit_push(SELF, str);
+					emit_push(RA, str);
+					emit_addiu(FP, SP, 4, str);			// $fp = $sp+4 i.e callee has become active now
+					emit_move(SELF, ACC, str);
 
-				// emit code for function body
-				Expression definition = func->expr;
-				definition->code(str);
+					// emit code for function body
+					Expression definition = func->expr;
+					definition->code(str);
 
-				emit_pop(RA, str);
-				emit_pop(SELF, str);
-				emit_pop(FP, str);
-				emit_addiu(SP, SP, numFormals*4, str);		// shift the stack pointer by number of arguments*4
-				emit_return(str);
+					emit_pop(RA, str);
+					emit_pop(SELF, str);
+					emit_pop(FP, str);
+					emit_addiu(SP, SP, numFormals*4, str);		// shift the stack pointer by number of arguments*4
+					emit_return(str);
+				}
 			}
 		}
 	}
