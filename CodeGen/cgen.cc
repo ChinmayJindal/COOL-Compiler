@@ -28,6 +28,7 @@
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
 unsigned long labelCounter=0;
+Symbol live_class;
 //
 // Three symbols from the semantic analyzer (semant.cc) are used.
 // If e : No_type, then no code is generated for e.
@@ -1003,6 +1004,7 @@ void CgenClassTable::code_class_init(){
 			if(attrib!=NULL){
 				Expression val = attrib->init;			// init contains the expression on RHS
 				if(val->get_type() != NULL){			// if expression has type assigned to it
+					live_class = current_class;
 					val->code(str);
 					int offset = 3 + attribDB[current_class][attrib->name].first;
 					emit_store(ACC, offset, SELF, str);	// put the evaluated expression at right place in object
@@ -1045,6 +1047,7 @@ void CgenClassTable::code_class_methods(){
 
 					// emit code for function body
 					Expression definition = func->expr;
+					live_class = current_class;
 					definition->code(str);
 
 					emit_pop(RA, str);
@@ -1136,12 +1139,36 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 //*****************************************************************
 
 void assign_class::code(ostream &s) {
+
 }
 
 void static_dispatch_class::code(ostream &s) {
+	cout << "called" << endl;
 }
 
 void dispatch_class::code(ostream &s) {
+	if (cgen_debug) cout << "Dispatch_class executing" << endl;
+	int numActuals = 0;					// number of arguments
+	// evaluate and push each argument on stack
+	for(int i=actual->first(); actual->more(i); i=actual->next(i)){
+		numActuals++;
+		actual->nth(i)->code(s);
+		emit_push(ACC, s);
+	}
+	expr->code(s); 			// code for the dispatch expression
+	emit_bne(ACC, ZERO, labelCounter, s);	// jump to label if its not void
+	// dispatch to void error
+	emit_load_address(ACC, "str_const0", s);
+	emit_load_imm(T1, 1, s);
+	emit_jal("_dispatch_abort", s);
+
+	// valid dispatch
+	emit_label_def(labelCounter, s);
+	emit_load(T1, 2, ACC, s);		// value of dispatch table for dispatch expression
+	int offset = methodDB[live_class][name].first;
+	emit_load(T1, offset, T1, s);	// go to appropriate offset in dipatch table
+	emit_jalr(T1, s);				// call that method
+	labelCounter++;
 }
 
 void cond_class::code(ostream &s) {
@@ -1203,14 +1230,20 @@ void eq_class::code(ostream &s) {
 	e1->code(s);
 	emit_push(ACC, s);
 	e2->code(s);
-	emit_pop(T1, s);
+	emit_pop(T1, s);		// $t1 = e1
+	emit_move(T2, ACC, s);	// $t2 = e2
+	emit_load_bool(ACC, truebool, s);
+	emit_beq(T1, T2, labelCounter, s);
+
 	Symbol exprType = e1->get_type();
 	if(exprType==Int || exprType==Str || exprType==Bool){
-
+    	emit_load_bool(ACC, truebool, s); 		// load true to $a0
+    	emit_load_bool(A1, falsebool, s); 		// load false to $a1
+    	emit_jal("equality_test",s);
 	}
-	else{
 
-	}
+	emit_label_def(labelCounter, s);
+	labelCounter++;
 }
 
 void leq_class::code(ostream &s) {
@@ -1257,4 +1290,8 @@ void no_expr_class::code(ostream &s) {
 }
 
 void object_class::code(ostream &s) {
+	if(name == self){
+		emit_move(ACC, SELF, s);
+		return;
+	}
 }
