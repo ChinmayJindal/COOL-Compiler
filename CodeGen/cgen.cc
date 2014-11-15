@@ -27,7 +27,7 @@
 
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
-
+unsigned long labelCounter=0;
 //
 // Three symbols from the semantic analyzer (semant.cc) are used.
 // If e : No_type, then no code is generated for e.
@@ -1160,30 +1160,66 @@ void let_class::code(ostream &s) {
 }
 
 void plus_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+	emit_add(ACC, ACC, T1, s);
 }
 
 void sub_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+	emit_sub(ACC, ACC, T1, s);
 }
 
 void mul_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+	emit_mul(ACC, ACC, T1, s);
 }
 
 void divide_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+	emit_div(ACC, ACC, T1, s);
 }
 
 void neg_class::code(ostream &s) {
+	e1->code(s);
+	emit_neg(ACC, ACC, s);
 }
 
 void lt_class::code(ostream &s) {
 }
 
 void eq_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+	Symbol exprType = e1->get_type();
+	if(exprType==Int || exprType==Str || exprType==Bool){
+
+	}
+	else{
+
+	}
 }
 
 void leq_class::code(ostream &s) {
 }
 
 void comp_class::code(ostream &s) {
+	e1->code(s);
+	emit_load_imm(T1, 1, s);		// T1 = 1
+	emit_sub(ACC, T1, ACC, s);		// ACC = 1-ACC
 }
 
 void int_const_class::code(ostream& s)  
@@ -1208,6 +1244,13 @@ void new__class::code(ostream &s) {
 }
 
 void isvoid_class::code(ostream &s) {
+	e1->code(s);
+	emit_load(T1, 0, ACC, s);
+	emit_load_bool(ACC, truebool, s);		// load true		
+	emit_beqz(T1, labelCounter, s);			// if expression is zero
+	emit_load_bool(ACC, falsebool, s); 		// load false
+	emit_label_def(labelCounter, s);		
+	labelCounter++;
 }
 
 void no_expr_class::code(ostream &s) {
