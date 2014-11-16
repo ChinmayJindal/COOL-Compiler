@@ -1143,11 +1143,19 @@ void assign_class::code(ostream &s) {
 }
 
 void static_dispatch_class::code(ostream &s) {
-	cout << "called" << endl;
+  if (cgen_debug) cout << "Static Dispatch_class executing" << endl;
+  int numActuals = 0;
+  for(int i=actual->first(i); actual->more(i); i=actual->more(i)){
+    numActuals++;
+    actual->nth(i)->code(s);
+    emit_push(ACC, s);
+  }
+
+
 }
 
 void dispatch_class::code(ostream &s) {
-	if (cgen_debug) cout << "Dispatch_class executing" << endl;
+  if (cgen_debug) cout << "Dispatch_class executing" << endl;
 	int numActuals = 0;					// number of arguments
 	// evaluate and push each argument on stack
 	for(int i=actual->first(); actual->more(i); i=actual->next(i)){
@@ -1179,12 +1187,29 @@ void cond_class::code(ostream &s) {
 }
 
 void loop_class::code(ostream &s) {
+  int condTrue = labelCounter;
+  labelCounter++;
+  int condFalse = labelCounter;
+  labelCounter++;
+
+  emit_label_def(condTrue, s);      // if condition is true
+  pred->code(s);                    // evaluate condition for loop execution
+  emit_fetch_int(T1, ACC, s);
+  emit_beqz(T1, condFalse, s);
+  body->code(s);                    // evaluate loop body
+  emit_branch(condTrue, s);
+
+  // return zero in accumulator if condition becomes false
+  emit_label_def(condFalse, s);
+  emit_move(ACC, ZERO, s);
 }
 
 void typcase_class::code(ostream &s) {
 }
 
 void block_class::code(ostream &s) {
+  for(int i=body->first(); body->more(i); i=body->next(i))
+    body->nth(i)->code(s);
 }
 
 void let_class::code(ostream &s) {
