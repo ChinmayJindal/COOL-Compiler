@@ -1165,7 +1165,11 @@ void dispatch_class::code(ostream &s) {
 	// valid dispatch
 	emit_label_def(labelCounter, s);
 	emit_load(T1, 2, ACC, s);		// value of dispatch table for dispatch expression
-	int offset = methodDB[live_class][name].first;
+	Symbol exprType = expr->get_type();
+	if(exprType == SELF_TYPE){
+		exprType = live_class;
+	}
+	int offset = methodDB[exprType][name].first;
 	emit_load(T1, offset, T1, s);	// go to appropriate offset in dipatch table
 	emit_jalr(T1, s);				// call that method
 	labelCounter++;
@@ -1190,40 +1194,69 @@ void plus_class::code(ostream &s) {
 	e1->code(s);
 	emit_push(ACC, s);
 	e2->code(s);
-	emit_pop(T1, s);
-	emit_add(ACC, ACC, T1, s);
+	emit_fetch_int(T2, ACC, s);		// t2 contains actual int value from object
+  emit_jal("Object.copy", s);
+	emit_pop(T1, s);			      	// t1=e1
+	emit_fetch_int(T1, T1, s);		// t1 contains actual int 
+	emit_add(T1, T1, T2, s);
+	emit_store_int(T1, ACC, s);		// store in accumulator
 }
 
 void sub_class::code(ostream &s) {
 	e1->code(s);
 	emit_push(ACC, s);
 	e2->code(s);
-	emit_pop(T1, s);
-	emit_sub(ACC, ACC, T1, s);
+	emit_fetch_int(T2, ACC, s);		// t2 contains actual int value from object
+  emit_jal("Object.copy", s);
+	emit_pop(T1, s);				// t1=e1
+	emit_fetch_int(T1, T1, s);		// t1 contains actual int 
+	emit_sub(T1, T1, T2, s);
+	emit_store_int(T1, ACC, s);		// store in a
 }
 
 void mul_class::code(ostream &s) {
 	e1->code(s);
 	emit_push(ACC, s);
 	e2->code(s);
-	emit_pop(T1, s);
-	emit_mul(ACC, ACC, T1, s);
+	emit_fetch_int(T2, ACC, s);		// t2 contains actual int value from object
+  emit_jal("Object.copy", s);   // make a new object in ACC
+	emit_pop(T1, s);				      // t1=e1
+	emit_fetch_int(T1, T1, s);		// t1 contains actual int 
+	emit_mul(T1, T1, T2, s);
+	emit_store_int(T1, ACC, s);		// store in a
 }
 
 void divide_class::code(ostream &s) {
 	e1->code(s);
 	emit_push(ACC, s);
 	e2->code(s);
-	emit_pop(T1, s);
-	emit_div(ACC, ACC, T1, s);
+	emit_fetch_int(T2, ACC, s);		// t2 contains actual int value from object
+  emit_jal("Object.copy", s);
+	emit_pop(T1, s);				// t1=e1
+	emit_fetch_int(T1, T1, s);		// t1 contains actual int 
+	emit_div(T1, T1, T2, s);
+	emit_store_int(T1, ACC, s);		// store in a
 }
 
 void neg_class::code(ostream &s) {
 	e1->code(s);
-	emit_neg(ACC, ACC, s);
+  emit_fetch_int(T1, ACC, s);     // load actual value
+	emit_neg(T1, T1, s);
+  emit_store_int(T1, ACC, s);
 }
 
 void lt_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+  emit_fetch_int(T1, T1, s);          // T1 contains actual value of e1
+	emit_fetch_int(T2, ACC, s);         // T2 contains actual value of e2
+	emit_load_bool(ACC, truebool, s);		// load true
+	emit_blt(T1, T2, labelCounter, s);
+	emit_load_bool(ACC, falsebool, s);		// load falsebool
+	emit_label_def(labelCounter, s);
+	labelCounter++;
 }
 
 void eq_class::code(ostream &s) {
@@ -1247,12 +1280,26 @@ void eq_class::code(ostream &s) {
 }
 
 void leq_class::code(ostream &s) {
+	e1->code(s);
+	emit_push(ACC, s);
+	e2->code(s);
+	emit_pop(T1, s);
+  emit_fetch_int(T1, T1, s);
+  emit_fetch_int(T2, ACC, s);
+	emit_load_bool(ACC, truebool, s);		// load true
+	emit_bleq(T1, T2, labelCounter, s);
+	emit_load_bool(ACC, falsebool, s);		// load false
+	emit_label_def(labelCounter, s);
+	labelCounter++;
 }
 
 void comp_class::code(ostream &s) {
 	e1->code(s);
-	emit_load_imm(T1, 1, s);		// T1 = 1
-	emit_sub(ACC, T1, ACC, s);		// ACC = 1-ACC
+  emit_fetch_int(T1, ACC, s);
+  emit_load_bool(ACC, truebool, s);   // load true
+  emit_beqz(T1, labelCounter, s);     // if T1 is zero then jump as we have to return true
+  emit_load_bool(ACC, falsebool, s);
+  emit_label_def(labelCounter, s);
 }
 
 void int_const_class::code(ostream& s)  
