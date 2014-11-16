@@ -27,9 +27,9 @@
 
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
-unsigned long labelCounter=0;             // counter for generating different labels
-Symbol live_class;                        // current class for which expressions are being coded
-std::map<Symbol, int> methodArgs;         // arguments of a method
+unsigned long labelCounter=0;            // counter for generating different labels
+Symbol live_class;                       // current class for which expressions are being coded
+std::vector<Symbol> methodArgs;          // arguments of a method
 std::vector<Symbol> letIds;              // let identifiers
 //
 // Three symbols from the semantic analyzer (semant.cc) are used.
@@ -640,7 +640,7 @@ CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 
    for (List<CgenNode> *l = nds; l; l=l->tl())
    		ordered_nodes.push_back(l->hd());
-   reverse(ordered_nodes.begin(), ordered_nodes.end());
+   std::reverse(ordered_nodes.begin(), ordered_nodes.end());
 
    code();
    exitscope();
@@ -904,6 +904,7 @@ void CgenClassTable::code_class_dispTab(){
 		for(it = methodDB[current_class].begin(); it!=methodDB[current_class].end(); it++)
 			ordered_methods.push_back(std::make_pair((it->second).first, it->first));
 
+    // sort using their offset values
 		std::sort(ordered_methods.begin(), ordered_methods.end(), compare);
 		
 		str << current_class << DISPTAB_SUFFIX << LABEL; 
@@ -988,8 +989,10 @@ void CgenClassTable::code_class_init(){
 	for(unsigned node_num=0; node_num<ordered_nodes.size(); node_num++){
 		CgenNodeP node = ordered_nodes[node_num];
 		Symbol current_class = node->get_name();
+    live_class = current_class;
 
 		str << current_class << CLASSINIT_SUFFIX << LABEL;
+    // saving frame pointer, self, return adress in stack, building AR
 		emit_push(FP, str);
 		emit_push(SELF, str);
 		emit_push(RA, str);
@@ -997,7 +1000,7 @@ void CgenClassTable::code_class_init(){
 		emit_move(SELF, ACC, str);			// save accumulater before calling parent
 
 		// call parent if its present
-		if(node->get_name() != Object)
+		if(current_class != Object)
 			str << JAL << node->get_parentnd()->get_name()->get_string() << CLASSINIT_SUFFIX << endl;
 
 		// evaluate all the initializations
@@ -1006,7 +1009,7 @@ void CgenClassTable::code_class_init(){
 			if(attrib!=NULL){
 				Expression val = attrib->init;			// init contains the expression on RHS
 				if(val->get_type() != NULL){			// if expression has type assigned to it
-					live_class = current_class;
+					
 					val->code(str);
 					int offset = 3 + attribDB[current_class][attrib->name].first;
 					emit_store(ACC, offset, SELF, str);	// put the evaluated expression at right place in object
@@ -1029,6 +1032,7 @@ void CgenClassTable::code_class_methods(){
 	for(unsigned node_num=0; node_num<ordered_nodes.size(); node_num++){
 		CgenNodeP node = ordered_nodes[node_num];
 		Symbol current_class = node->get_name();
+    live_class = current_class;
 
 		if(current_class!=Object && current_class!=Str && current_class!=IO){
 			// iterate over all the methods
@@ -1037,8 +1041,17 @@ void CgenClassTable::code_class_methods(){
 				if(func != NULL){
 					// calculate number of formals for this method
 					int numFormals = 0;
-					for(unsigned j=func->formals->first(); func->formals->more(j); j=func->formals->next(i))
-						numFormals++;
+          methodArgs.clear();
+          /* caller has pushed all the arguments in the stack. Here at callee side we push all of them
+            in a vector so that in expression coding for methods, appropriate offset can be determined. */
+					for(unsigned j=func->formals->first(); func->formals->more(j); j=func->formals->next(j)){
+						formal_class *curFormal = dynamic_cast<formal_class *> (func->formals->nth(j));
+            if(curFormal!=NULL){
+              methodArgs.push_back(curFormal->name);
+              numFormals++;
+            }
+          }
+          if(cgen_debug) cout<<func->name<<endl;
 
 					str << current_class << METHOD_SEP << func->name << LABEL;
 					emit_push(FP, str);
@@ -1049,9 +1062,9 @@ void CgenClassTable::code_class_methods(){
 
 					// emit code for function body
 					Expression definition = func->expr;
-					live_class = current_class;
 					definition->code(str);
 
+          // pop the values pushed into stack after functione execution
 					emit_pop(RA, str);
 					emit_pop(SELF, str);
 					emit_pop(FP, str);
@@ -1141,17 +1154,28 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 //*****************************************************************
 
 void assign_class::code(ostream &s) {
-  // name <- expr
-  expr->code(s);             // code the RHS
+  if(cgen_debug) cout << "assign class executing" << endl;
+  // name <- expr     (format of asign expression)
   int offset;
+  expr->code(s);             // code the RHS
 
   /* If assignment is in a let body i.e name is in let
      find LHS in letIds and go to corresponding stack address
   */
-  for(int i=letIds.size(); i>=0; i--){
+  for(int i=letIds.size()-1; i>=0; i--){
     if(name == letIds[i]){
-      offset = letIds.size() - i;
+      offset = letIds.size() - i;       // LHS found in let
       emit_store(ACC, offset, SP, s);
+      return;
+    }
+  }
+
+  /* If name is an argument, then retrieve from stack by finding the offset from methodArgs */
+
+  for(int i=0; i<methodArgs.size(); i++){
+    if(name == methodArgs[i]){
+      offset = methodArgs.size() -1 -i;
+      emit_store(ACC, offset+3, FP, s);
       return;
     }
   }
@@ -1159,20 +1183,22 @@ void assign_class::code(ostream &s) {
   //  normal attribute of class, get its position in protoObj
   offset = attribDB[live_class][name].first;
   emit_store(ACC, 3+offset, SELF, s);
-
 }
+
 
 void static_dispatch_class::code(ostream &s) {
   if (cgen_debug) cout << "Static Dispatch_class executing" << endl;
-  int numActuals = 0;
-  for(int i=actual->first(); actual->more(i); i=actual->more(i)){
+  int numActuals = 0;       // number of arguments passed while dispatch
+ 
+  for(unsigned i=actual->first(); actual->more(i); i=actual->more(i)){
     numActuals++;
     actual->nth(i)->code(s);
-    emit_push(ACC, s);
     // dispatch can be inside let expression
     letIds.push_back(No_type);
+    emit_push(ACC, s);
+
   }
-  expr->code(s);
+  expr->code(s);                         // evaluate the dispatch expression
   emit_bne(ACC, ZERO, labelCounter, s); // jump to label if its not void
   // dispatch to void error
   emit_load_address(ACC, "str_const0", s);
@@ -1186,15 +1212,20 @@ void static_dispatch_class::code(ostream &s) {
   if(exprType == SELF_TYPE){
     exprType = live_class;
   }
-  char* dispTable = exprType->get_string();
-  strcat(dispTable, "_dispTab");
-  emit_load_address(T1, dispTable, s);
+  // getting the address of the method to dispatch
+  char* tempAddress = exprType->get_string();
+  char finalAddress[500];
+  strcpy(finalAddress, tempAddress);
+  strcat(finalAddress, "_dispTab");
+
+  emit_load_address(T1, finalAddress, s);
   int offset = methodDB[exprType][name].first;
   emit_load(T1, offset, T1, s);          // go to appropriate offset in dipatch table
   emit_jalr(T1, s);                       // call that method
   // after dispatch is over, pop the dummies from letIds
   for(int i=0; i<numActuals; i++)
     letIds.pop_back();
+
   labelCounter++;
 }
 
@@ -1225,31 +1256,32 @@ void dispatch_class::code(ostream &s) {
 	int offset = methodDB[exprType][name].first;
 	emit_load(T1, offset, T1, s);	// go to appropriate offset in dipatch table
 	emit_jalr(T1, s);				// call that method
+  // pop back dummies from let after call is finished
   for(int i=0; i<numActuals; i++)
     letIds.pop_back();
 	labelCounter++;
 }
 
 void cond_class::code(ostream &s) {
+  // if pred then then_exp else else_exp
   int condThen = labelCounter++;
   int condElse = labelCounter++;
 
-  pred->code(s);
+  pred->code(s);                          // code for pre-condition expression
   emit_fetch_int(T1, ACC, s);
   emit_beqz(T1, condElse, s);             // if condition is false 
   then_exp->code(s);
   emit_branch(condThen, s);
 
-  emit_label_def(condElse, s);        // else label
+  emit_label_def(condElse, s);           // else label
   else_exp->code(s);
   emit_label_def(condThen, s);
 }
 
 void loop_class::code(ostream &s) {
-  int condTrue = labelCounter;
-  labelCounter++;
-  int condFalse = labelCounter;
-  labelCounter++;
+  // loop pred body pool
+  int condTrue = labelCounter++;
+  int condFalse = labelCounter++;
 
   emit_label_def(condTrue, s);      // if condition is true
   pred->code(s);                    // evaluate condition for loop execution
@@ -1267,6 +1299,7 @@ void typcase_class::code(ostream &s) {
 }
 
 void block_class::code(ostream &s) {
+  // emit code for each line of the block
   for(int i=body->first(); body->more(i); i=body->next(i))
     body->nth(i)->code(s);
 }
@@ -1281,32 +1314,33 @@ void let_class::code(ostream &s) {
     Object => 0
   */
   if(init->get_type() == NULL){
-    if(type_decl==Int)
+    if(type_decl==Int)            // for int
       emit_load_int(ACC, inttable.lookup_string("0"), s);
-    else if(type_decl==Str)
+    else if(type_decl==Str)       // for string
       emit_load_string(ACC, stringtable.lookup_string(""), s);
-    else if(type_decl==Bool)
+    else if(type_decl==Bool)      // for bool
       emit_load_bool(ACC, falsebool, s);
-    else
+    else                          // for objects
       emit_load_imm(ACC, 0, s);
   }
   else{
-    init->code(s);
+    init->code(s);        // if the identifier has some assignment
   }
-  emit_push(ACC, s);
   // push the identifier in vector so that offset can be found while body evaluation
   letIds.push_back(identifier);
+  emit_push(ACC, s);
   body->code(s);        // evaluate the body of let
+  emit_addiu(SP, SP, 4, s);
   letIds.pop_back();    // after body evaluation, identifier is not valid
-  emit_pop(T1, s);
 }
 
 void plus_class::code(ostream &s) {
-	e1->code(s);
-  letIds.push_back(No_type);
+	e1->code(s);                  // evaluate expression 1
 	emit_push(ACC, s);
-	e2->code(s);
+	letIds.push_back(No_type);    // push dummy value into let arguments
+  e2->code(s);
 	emit_fetch_int(T2, ACC, s);		// t2 contains actual int value from object
+  // create a new object to return the value into
   emit_jal("Object.copy", s);
 	emit_pop(T1, s);			      	// t1=e1
 	letIds.pop_back();
@@ -1357,40 +1391,46 @@ void divide_class::code(ostream &s) {
 	emit_store_int(T1, ACC, s);		// store in a
 }
 
+// function to code the negate expressions (~expr)
 void neg_class::code(ostream &s) {
-	e1->code(s);
-  emit_fetch_int(T1, ACC, s);     // load actual value
-	emit_neg(T1, T1, s);
-  emit_store_int(T1, ACC, s);
+	e1->code(s);                    // code the expression
+  emit_fetch_int(T2, ACC, s);     // load actual value
+	emit_jal("Object.copy", s);
+  emit_neg(T2, T2, s);
+  emit_store_int(T2, ACC, s);
 }
 
+// function to code for the calculation of e1<e2
 void lt_class::code(ostream &s) {
-	e1->code(s);
+	e1->code(s);               // code the expression e1
 	emit_push(ACC, s);
   letIds.push_back(No_type);
-	e2->code(s);
+	e2->code(s);               // code e2
 	emit_pop(T1, s);
   letIds.pop_back();
   emit_fetch_int(T1, T1, s);          // T1 contains actual value of e1
 	emit_fetch_int(T2, ACC, s);         // T2 contains actual value of e2
 	emit_load_bool(ACC, truebool, s);		// load true
-	emit_blt(T1, T2, labelCounter, s);
+	emit_blt(T1, T2, labelCounter, s);    // branch if T1 < T2
 	emit_load_bool(ACC, falsebool, s);		// load falsebool
 	emit_label_def(labelCounter, s);
 	labelCounter++;
 }
 
+// function to code for the expression e1==e2
 void eq_class::code(ostream &s) {
-	e1->code(s);
+	e1->code(s);           // code the expression e1
 	emit_push(ACC, s);
   letIds.push_back(No_type);
-	e2->code(s);
+	e2->code(s);           // code the expression e2
 	emit_pop(T1, s);		// $t1 = e1
   letIds.pop_back();
 	emit_move(T2, ACC, s);	// $t2 = e2
 	emit_load_bool(ACC, truebool, s);
-	emit_beq(T1, T2, labelCounter, s);
+	emit_beq(T1, T2, labelCounter, s);       // if t1, t2 has same address then they are equal and jump
 
+  // otherwise we have to return false
+  emit_load_bool(ACC, falsebool, s);
 	Symbol exprType = e1->get_type();
 	if(exprType==Int || exprType==Str || exprType==Bool){
     	emit_load_bool(ACC, truebool, s); 		// load true to $a0
@@ -1402,11 +1442,12 @@ void eq_class::code(ostream &s) {
 	labelCounter++;
 }
 
+// function to code for expression e1<=e2
 void leq_class::code(ostream &s) {
-	e1->code(s);
+	e1->code(s);             // code expression e1
 	emit_push(ACC, s);
   letIds.push_back(No_type);
-	e2->code(s);
+	e2->code(s);             // code expression e2
 	emit_pop(T1, s);
   letIds.pop_back();
   emit_fetch_int(T1, T1, s);
@@ -1418,6 +1459,7 @@ void leq_class::code(ostream &s) {
 	labelCounter++;
 }
 
+// function to code for the complement expression
 void comp_class::code(ostream &s) {
 	e1->code(s);
   emit_fetch_int(T1, ACC, s);
@@ -1425,6 +1467,7 @@ void comp_class::code(ostream &s) {
   emit_beqz(T1, labelCounter, s);     // if T1 is zero then jump as we have to return true
   emit_load_bool(ACC, falsebool, s);
   emit_label_def(labelCounter, s);
+  labelCounter++;
 }
 
 void int_const_class::code(ostream& s)  
@@ -1446,13 +1489,32 @@ void bool_const_class::code(ostream& s)
 }
 
 void new__class::code(ostream &s) {
+  // new type_name
+
+  if(type_name != SELF_TYPE){
+    char *className = type_name->get_string();        // classname for the new
+    // construct the prototype string i.e className_protObj for the requested className
+    char protoType[200] = "";
+    strcpy(protoType, className);
+    strcat(protoType, "_protObj");
+    emit_load_address(ACC, protoType, s);       // load the address of that prototype into accumulator
+
+    /* construct the init method string i.e className_init for jumping over to
+        so that we can initialise the requested object */
+    char initMethod[200] = "";
+    strcpy(initMethod, className);  
+    strcat(initMethod, "_init");
+    emit_jal("Object.copy", s);     // create a new object for storing the newly created object
+    emit_jal(initMethod, s);        // jump to the init of the class
+  }
 }
 
+// function to code the isvoid expr
 void isvoid_class::code(ostream &s) {
-	e1->code(s);
+	e1->code(s);                         // evaluate the expression
 	emit_load(T1, 0, ACC, s);
 	emit_load_bool(ACC, truebool, s);		// load true		
-	emit_beqz(T1, labelCounter, s);			// if expression is zero
+	emit_beqz(T1, labelCounter, s);			// if expression is zero, jump to labelCounter
 	emit_load_bool(ACC, falsebool, s); 		// load false
 	emit_label_def(labelCounter, s);		
 	labelCounter++;
@@ -1461,25 +1523,44 @@ void isvoid_class::code(ostream &s) {
 void no_expr_class::code(ostream &s) {
 }
 
+// function to code the expressions which are not objects
 void object_class::code(ostream &s) {
+  if(cgen_debug) cout<<"Entered into object_class"<<endl;
+  // if its self, it points to same class prototype which is stored in $s0
 	if(name == self){
-		emit_load(ACC, 0, SELF, s);
+		emit_move(ACC, SELF, s);
 		return;
 	}
 
   int offset;
+  
 
   /* If object is in a let expression,
      find it in letIds and go to corresponding stack address
   */
-  for(int i=letIds.size(); i>=0; i--){
+  for(int i=letIds.size()-1; i>=0; i--){
     if(name == letIds[i]){
       offset = letIds.size() - i;
+      // 
       emit_load(ACC, offset, SP, s);
       return;
     }
   }
 
+  /* If name is an argument, then retrieve from stack by finding the offset from methodArgs */
+  for(int i=0; i<methodArgs.size(); i++){
+    if(cgen_debug)cout<<name<<endl;
+    if(name == methodArgs[i]){
+      offset = methodArgs.size()-i-1;
+      /* offset+3 because attributes are after 3 locations in activation record after
+         frame pointer, return address, self pointer*/
+      emit_load(ACC, offset+3, FP, s);
+      return;
+    }
+  }
+
+  /* otherwise for a simple attribute, search in class prototype objects at 3 places
+     after class tag, size, dispatch pointer */
   offset = attribDB[live_class][name].first;
   emit_load(ACC, 3+offset, SELF, s);
 }
