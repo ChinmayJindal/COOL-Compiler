@@ -1145,13 +1145,32 @@ void assign_class::code(ostream &s) {
 void static_dispatch_class::code(ostream &s) {
   if (cgen_debug) cout << "Static Dispatch_class executing" << endl;
   int numActuals = 0;
-  for(int i=actual->first(i); actual->more(i); i=actual->more(i)){
+  for(int i=actual->first(); actual->more(i); i=actual->more(i)){
     numActuals++;
     actual->nth(i)->code(s);
     emit_push(ACC, s);
   }
+  expr->code(s);
+  emit_bne(ACC, ZERO, labelCounter, s); // jump to label if its not void
+  // dispatch to void error
+  emit_load_address(ACC, "str_const0", s);
+  emit_load_imm(T1, 1, s);
+  emit_jal("_dispatch_abort", s);
 
+  // valid dispatch
+  emit_label_def(labelCounter, s);
 
+  Symbol exprType = type_name;          // type_name contains the type of dispatch
+  if(exprType == SELF_TYPE){
+    exprType = live_class;
+  }
+  char* dispTable = exprType->get_string();
+  strcat(dispTable, "_dispTab");
+  emit_load_address(T1, dispTable, s);
+  int offset = methodDB[exprType][name].first;
+  emit_load(T1, offset, T1, s);          // go to appropriate offset in dipatch table
+  emit_jalr(T1, s);                       // call that method
+  labelCounter++;
 }
 
 void dispatch_class::code(ostream &s) {
@@ -1184,6 +1203,18 @@ void dispatch_class::code(ostream &s) {
 }
 
 void cond_class::code(ostream &s) {
+  int condThen = labelCounter++;
+  int condElse = labelCounter++;
+
+  pred->code(s);
+  emit_fetch_int(T1, ACC, s);
+  emit_beqz(T1, condElse, s);             // if condition is false 
+  then_exp->code(s);
+  emit_branch(condThen, s);
+
+  emit_label_def(condElse, s);        // else label
+  else_exp->code(s);
+  emit_label_def(condThen, s);
 }
 
 void loop_class::code(ostream &s) {
@@ -1193,11 +1224,11 @@ void loop_class::code(ostream &s) {
   labelCounter++;
 
   emit_label_def(condTrue, s);      // if condition is true
-  pred->code(s);                    // evaluate condition for loop execution
+  pred->code(s);                    // evaluate conlabel1dition for loop execution
   emit_fetch_int(T1, ACC, s);
   emit_beqz(T1, condFalse, s);
   body->code(s);                    // evaluate loop body
-  emit_branch(condTrue, s);
+  emit_branch(condTrue, s);         // unconditional jump
 
   // return zero in accumulator if condition becomes false
   emit_label_def(condFalse, s);
@@ -1363,7 +1394,9 @@ void no_expr_class::code(ostream &s) {
 
 void object_class::code(ostream &s) {
 	if(name == self){
-		emit_move(ACC, SELF, s);
+		emit_load(ACC, 0, SELF, s);
 		return;
 	}
+  int offset = attribDB[live_class][name].first;
+  emit_load(ACC, 3+offset, SELF, s);
 }
