@@ -1512,7 +1512,7 @@ void new__class::code(ostream &s) {
 // function to code the isvoid expr
 void isvoid_class::code(ostream &s) {
 	e1->code(s);                         // evaluate the expression
-	emit_load(T1, 0, ACC, s);
+	emit_move(T1, ACC, s);
 	emit_load_bool(ACC, truebool, s);		// load true		
 	emit_beqz(T1, labelCounter, s);			// if expression is zero, jump to labelCounter
 	emit_load_bool(ACC, falsebool, s); 		// load false
